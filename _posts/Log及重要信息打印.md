@@ -1,0 +1,264 @@
+## Log及重要信息打印
+>我们在项目未上线之前的开发阶段可以进行debug、加断点等方式进行代码的调试。但是在项目上线之后，当用户进行bug反馈时，我们无法直接了解到用户当时的使用情况，来重现用户的使用场景，所以将项目中重要模块、重要方法进行监控，已查看其是否执行，就变得尤为重要。我们可以把这些信息保存在用户手机本地文件下，当其进行问题反馈时，我们便可以让用户将这些文件发送给我们，我们也可以更快的定位问题。这是我在项目中用过的两种方式，来进行将项目中所要保存的重要信息及Log信息保存本地的方法。
+
+---
+### - 抓取系统Log并进行过滤保存
+> 该种方法主要用来保存通过系统Log方法打印出的日志:如  
+Log.e("tag","logMessage");  
+Log.i("tag","logMessage");  
+Log.w("tag","logMessage");  
+Log.d("tag","logMessage");  
+Log.v("tag","logMessage");  
+通过过滤Log等级和标签来保存响应的Log信息。  
+
+```
+public class LogcatHelper {
+
+    private static LogcatHelper INSTANCE = null;
+    private static String PATH_LOGCAT;
+    private LogDumper mLogDumper = null;
+    private int mPId;
+    private String fileName = "";                        //保存的文件名字
+
+
+    /**
+     *
+     * 初始化目录
+     *
+     * */
+    public void init(Context context, String fileName) {
+        if (Environment.getExternalStorageState().equals(
+                Environment.MEDIA_MOUNTED)) {// 优先保存到SD卡中
+            PATH_LOGCAT = Environment.getExternalStorageDirectory()
+                    .getAbsolutePath() + File.separator + "SystemLog";
+        } else {// 如果SD卡不存在，就保存到本应用的目录下
+            PATH_LOGCAT = context.getFilesDir().getAbsolutePath()
+                    + File.separator + "SystemLog";
+        }
+        File file = new File(PATH_LOGCAT);
+        if (!file.exists()) {
+            file.mkdirs();
+        }
+        if(fileName != null)
+            this.fileName = fileName;
+    }
+
+    public static LogcatHelper getInstance(Context context, String fileName) {
+        if (INSTANCE == null) {
+            INSTANCE = new LogcatHelper(context, fileName);
+        }
+        return INSTANCE;
+    }
+
+    private LogcatHelper(Context context, String fileName) {
+        init(context, fileName);
+        mPId = android.os.Process.myPid();
+    }
+
+    public void start() {
+        mLogDumper = null;
+        mLogDumper = new LogDumper(String.valueOf(mPId), PATH_LOGCAT);
+        mLogDumper.start();
+    }
+
+    public void stop() {
+        if (mLogDumper != null) {
+            mLogDumper.stopLogs();
+            mLogDumper = null;
+        }
+    }
+
+    private class LogDumper extends Thread {
+
+        private Process logcatProc;
+        private BufferedReader mReader = null;
+        private boolean mRunning = true;
+        String cmds = null;
+        private String mPID;
+        private FileOutputStream out = null;
+
+        public LogDumper(String pid, String dir) {
+            mPID = pid;
+            try {
+                out = new FileOutputStream(new File(dir, fileName
+                        + LogcatDate.getFileName()+ ".txt"));
+            } catch (FileNotFoundException e) {
+                // TODO Auto-generated catch block
+                e.printStackTrace();
+            }
+            /** 
+             *  
+             * 日志等级：*:v , *:d , *:w , *:e , *:f , *:s 
+             *  
+             * 显示当前mPID程序的 E和W等级的日志. 
+             *  
+             * */  
+  
+            // cmds = "logcat *:e *:w | grep \"(" + mPID + ")\"";  
+            // cmds = "logcat  | grep \"(" + mPID + ")\"";//打印所有日志信息  
+            // cmds = "logcat -s way";//打印标签过滤信息  
+
+            cmds = "logcat -s " + fileName;//打印过滤日志信息
+
+        }
+
+        public void stopLogs() {
+            mRunning = false;
+        }
+
+        @Override
+        public void run() {
+            try {
+                logcatProc = Runtime.getRuntime().exec(cmds);
+                mReader = new BufferedReader(new InputStreamReader(
+                        logcatProc.getInputStream()), 1024);
+                String line = null;
+                while (mRunning && (line = mReader.readLine()) != null) {
+                    if (!mRunning) {
+                        break;
+                    }
+                    if (line.length() == 0) {
+                        continue;
+                    }
+                    if (out != null && line.contains(mPID)) {
+                        out.write((LogcatDate.getFileName() + "  " + line + "\n")
+                                .getBytes());
+                    }
+                }
+
+            } catch (IOException e) {
+                e.printStackTrace();
+            } finally {
+                if (logcatProc != null) {
+                    logcatProc.destroy();
+                    logcatProc = null;
+                }
+                if (mReader != null) {
+                    try {
+                        mReader.close();
+                        mReader = null;
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                }
+                if (out != null) {
+                    try {
+                        out.close();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                    out = null;
+                }
+
+            }
+
+        }
+
+    }
+}
+```
+##### 不要忘记申请权限
+
+```
+<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />  
+<uses-permission android:name="android.permission.READ_LOGS" />  
+```
+##### 在onCreate和onDestroy中调用。
+```
+@Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activit_main);
+        LogcatHelper.getInstance(this, this.getLocalClassName()).start(); 
+    }
+    
+@Override
+    protected void onDestroy() {
+        super.onDestroy();
+        LogcatHelper.getInstance(this, this.getLocalClassName()).stop();
+    }
+```
+##### Summary
+> 此种方式对于只是保存文件信息来说，多少有一些“铺张浪费”了，对于只需要一点点信息的程序来说，确实造成了很大的资源浪费。并且Log的权限申请在某些机型上可能不会申请成功，因此这种写法并不十分合适，也请在使用过程中谨慎使用。接下来我们介绍另一种纯文件读写的方式。
+
+---
+### - 文件写入方式存储Log信息
+> 其实这种方式也不能被称作存储Log信息，其就是单纯的文件写入手机的方式，任何你想保存到本地的信息，都可以通过这种方式进行保存。采用传统Java文件写入的方式，只不过是文件的写入位置不同而已。
+
+```
+public class LogcatHelper {
+
+    private static LogcatHelper INSTANCE = null;
+    private static String PATH_LOGCAT;
+    private File parentFile;
+    private File logFile;
+
+    /**
+     *
+     * 初始化目录
+     *
+     * */
+    public void init(Context context, String fileName) {
+        if (Environment.getExternalStorageState().equals(
+                Environment.MEDIA_MOUNTED)) {// 优先保存到SD卡中
+            PATH_LOGCAT = Environment.getExternalStorageDirectory()
+                    .getAbsolutePath() + File.separator + "SystemLog";
+        } else {// 如果SD卡不存在，就保存到本应用的目录下
+            PATH_LOGCAT = context.getFilesDir().getAbsolutePath()
+                    + File.separator + "SystemLog";
+        }
+        parentFile = new File(PATH_LOGCAT);
+        if (!parentFile.exists()) {
+            parentFile.mkdirs();
+        }
+        logFile = new File(parentFile,fileName + LogcatDate.getFileName() + ".txt");
+
+    }
+
+    public void writeLog(String logMessage) {
+        try {
+            if (!logFile.exists()) {
+                logFile.createNewFile();
+            }
+            FileWriter writer = new FileWriter(logFile, true);
+            writer.write(logMessage + "\n");
+            writer.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static LogcatHelper getInstance() {
+        if (INSTANCE == null) {
+            INSTANCE = new LogcatHelper();
+        }
+        return INSTANCE;
+    }
+}
+```
+##### 权限申请
+```
+  <!-- SDCard中创建与删除文件权限 -->  
+  <uses-permission android:name="android.permission.MOUNT_UNMOUNT_FILESYSTEMS"/>  
+ <!-- 向SDCard写入数据权限 -->  
+ <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+```
+```
+@Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activit_main);
+        LogcatHelper.getInstance().init(this, "className"); 
+    }
+```
+
+```
+LogcatHelper.getInstance().writeLog("--->initData--->onSuccess");
+```
+> 该方式只需在每次进入一个Activity或其他需要存储
+的地方初始化位置进行初始化，随后在想进行存储的地方调用该方法。
+
+
+
+
+
