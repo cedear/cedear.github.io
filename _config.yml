@@ -5,7 +5,7 @@ header-img: img/post-bg-desk.jpg
 email: cedear@163.com
 description: "Every failure is leading towards success."
 keyword: "Cedar7, Android, Java, Bugs"
-url: "http://Cedear.github.io"          # your host, for absolute URL
+url: "http://cedear.github.io"          # your host, for absolute URL
 baseurl: ""      # for example, '/blog' if your blog hosted on 'host/blog'
 github_repo: "https://github.com/cedear/Cedear.github.io" # you code repository
 
